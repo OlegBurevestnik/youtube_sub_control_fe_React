@@ -4,8 +4,13 @@ import {SubscriptionCard} from "../components/SubscriptionCard";
 
 export const SubscriptionsPage: React.FC = () => {
     const [subscriptions, setSubscriptions] = useState<SubscriptionItem[]>([]);
+    const [total, setTotal] = useState<number>(0);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
+    const [filter, setFilter] = useState("");
+
+
+
 
     useEffect(() => {
         fetch("/api/subscriptions") // backend должен проксироваться через Vite
@@ -18,6 +23,7 @@ export const SubscriptionsPage: React.FC = () => {
                     thumbnailUrl: item.snippet.thumbnails.default?.url || "",
                 }));
                 setSubscriptions(items);
+                setTotal(data.pageInfo.totalResults || 0); // <- сохраняем общее количество
             });
     }, []);
 
@@ -50,10 +56,72 @@ export const SubscriptionsPage: React.FC = () => {
         setLoading(false);
     };
 
+    const filteredSubscriptions = subscriptions.filter((sub) =>
+        (sub.title || "").toLowerCase().includes(filter.toLowerCase()) ||
+        (sub.channelTitle || "").toLowerCase().includes(filter.toLowerCase())
+    );
+
+    const handleSelectAllFiltered = () => {
+        const newSet = new Set(selectedIds);
+        filteredSubscriptions.forEach(sub => newSet.add(sub.id));
+        setSelectedIds(newSet);
+    };
+
+    const handleDeselectAllFiltered = () => {
+        const newSet = new Set(selectedIds);
+        filteredSubscriptions.forEach(sub => newSet.delete(sub.id));
+        setSelectedIds(newSet);
+    };
+
+
     return (
         <div style={{maxWidth: 600, margin: "0 auto", padding: "20px"}}>
             <h2>Мои подписки на YouTube</h2>
-            {subscriptions.map((item) => (
+            <h3>Всего подписок: {total}</h3>
+
+            <input
+                type="text"
+                placeholder="Фильтр по названию канала"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                style={{
+                    width: "100%",
+                    marginBottom: "16px",
+                    padding: "8px",
+                    fontSize: "16px"
+                }}
+            />
+
+            <button
+                onClick={handleSelectAllFiltered}
+                disabled={filteredSubscriptions.length === 0}
+                style={{
+                    marginBottom: "16px",
+                    marginLeft: "8px",
+                    padding: "8px"
+                }}
+            >
+                Выбрать все отображаемые
+            </button>
+
+            <button
+                onClick={handleDeselectAllFiltered}
+                disabled={filteredSubscriptions.length === 0}
+                style={{
+                    marginBottom: "16px",
+                    marginLeft: "8px",
+                    padding: "8px"
+                }}
+            >
+                Снять выделение
+            </button>
+
+            {selectedIds.size > 0 && (
+                <button onClick={handleUnsubscribe} disabled={loading}>
+                    {loading ? "Удаление..." : `Удалить выбранные (${selectedIds.size})`}
+                </button>
+            )}
+            {filteredSubscriptions.map((item) => (
                 <SubscriptionCard
                     key={item.id}
                     item={item}
@@ -61,12 +129,8 @@ export const SubscriptionsPage: React.FC = () => {
                     onChange={handleCheck}
                 />
             ))}
-
-            {selectedIds.size > 0 && (
-                <button onClick={handleUnsubscribe} disabled={loading}>
-                    {loading ? "Удаление..." : `Удалить выбранные (${selectedIds.size})`}
-                </button>
-            )}
         </div>
     );
 };
+
+
