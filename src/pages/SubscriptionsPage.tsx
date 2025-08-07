@@ -8,24 +8,28 @@ export const SubscriptionsPage: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState("");
-
-
-
+    const [page, setPage] = useState(1);
+    const itemsPerPage = 25;
 
     useEffect(() => {
-        fetch("/api/subscriptions") // backend должен проксироваться через Vite
-            .then((res) => res.json())
-            .then((data) => {
-                const items = data.items.map((item: any) => ({
-                    id: item.id,
-                    title: item.snippet.title,
-                    channelTitle: item.snippet.channelTitle,
-                    thumbnailUrl: item.snippet.thumbnails.default?.url || "",
-                }));
-                setSubscriptions(items);
-                setTotal(data.pageInfo.totalResults || 0); // <- сохраняем общее количество
-            });
-    }, []);
+        const timeout = setTimeout(() => {
+            fetch(`/api/subscriptions?query=${encodeURIComponent(filter)}&page=${page}&limit=${itemsPerPage}`)
+                .then(res => res.json())
+                .then(data => {
+                    const items = data.items.map((item: any) => ({
+                        id: item.id,
+                        title: item.snippet.title,
+                        channelTitle: item.snippet.channelTitle,
+                        thumbnailUrl: item.snippet.thumbnails.default?.url || "",
+                    }));
+                    setSubscriptions(items);
+                    setTotal(data.totalResults || 0); // <- сохраняем общее количество
+                });
+        }, 300);
+
+        return () => clearTimeout(timeout);
+    }, [filter, page]);
+
 
     const handleCheck = (id: string, isChecked: boolean) => {
         setSelectedIds((prev) => {
@@ -91,6 +95,18 @@ export const SubscriptionsPage: React.FC = () => {
                     fontSize: "16px"
                 }}
             />
+
+            <p>
+                Отображаются {subscriptions.length} из {total} подписок
+            </p>
+
+            <button onClick={() => setPage(page - 1)} disabled={page === 1}>
+                Назад
+            </button>
+            <button onClick={() => setPage(page + 1)} disabled={page * itemsPerPage >= total}>
+                Вперёд
+            </button>
+            <span>Страница {page}</span>
 
             <button
                 onClick={handleSelectAllFiltered}
