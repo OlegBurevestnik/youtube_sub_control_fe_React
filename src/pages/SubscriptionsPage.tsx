@@ -8,27 +8,57 @@ export const SubscriptionsPage: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState("");
-    const [page, setPage] = useState(1);
+    const [draftFilter, setDraftFilter] = useState("");
+    const [appliedFilter, setAppliedFilter] = useState("");
+    const [page, setPage] = useState(1)
     const itemsPerPage = 25;
 
     useEffect(() => {
-        const timeout = setTimeout(() => {
-            fetch(`/api/subscriptions?query=${encodeURIComponent(filter)}&page=${page}&limit=${itemsPerPage}`)
-                .then(res => res.json())
-                .then(data => {
-                    const items = data.items.map((item: any) => ({
-                        id: item.id,
-                        title: item.snippet.title,
-                        channelTitle: item.snippet.channelTitle,
-                        thumbnailUrl: item.snippet.thumbnails.default?.url || "",
-                    }));
-                    setSubscriptions(items);
-                    setTotal(data.totalResults || 0); // <- сохраняем общее количество
-                });
-        }, 300);
+        const ac = new AbortController();
 
-        return () => clearTimeout(timeout);
-    }, [filter, page]);
+        (async () => {
+            setLoading(true);
+            try {
+                const res = await fetch(
+                    `/api/subscriptions?query=${encodeURIComponent(appliedFilter)}&page=${page}&limit=${itemsPerPage}`,
+                    { credentials: "include", signal: ac.signal }
+                );
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                const items = (data.items ?? []).map((item: any) => ({
+                    id: item.id,
+                    title: item?.snippet?.title ?? "",
+                    channelTitle: item?.snippet?.channelTitle ?? "",
+                    thumbnailUrl: item?.snippet?.thumbnails?.default?.url ?? "",
+                }));
+
+                setSubscriptions(items);
+                setTotal(data.totalResults ?? 0);
+            } catch (e) {
+                if ((e as any).name !== "AbortError") {
+                    console.error(e);
+                }
+            } finally {
+                setLoading(false);
+            }
+        })();
+
+        return () => ac.abort();
+    }, [appliedFilter, page, itemsPerPage]);
+
+    // клик по кнопке "Применить"
+    const applyFilter = () => {
+        setPage(1);                 // при новом фильтре возвращаемся на 1‑ю страницу
+        setAppliedFilter(draftFilter.trim());
+    };
+
+    // (опционально) очистка
+    const clearFilter = () => {
+        setDraftFilter("");
+        setAppliedFilter("");
+        setPage(1);
+    };
 
 
     const handleCheck = (id: string, isChecked: boolean) => {
@@ -86,15 +116,17 @@ export const SubscriptionsPage: React.FC = () => {
             <input
                 type="text"
                 placeholder="Фильтр по названию канала"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                style={{
-                    width: "100%",
-                    marginBottom: "16px",
-                    padding: "8px",
-                    fontSize: "16px"
-                }}
+                value={draftFilter}
+                onChange={(e) => setDraftFilter(e.target.value)}
+                style={{ flex: 1, padding: 8 }}
+                onKeyDown={(e) => { if (e.key === "Enter") applyFilter(); }} // по Enter тоже можно
             />
+            <button onClick={applyFilter} disabled={draftFilter.trim() === appliedFilter.trim()}>
+                Применить
+            </button>
+            <button onClick={clearFilter} disabled={!draftFilter && !appliedFilter}>
+                Сбросить
+            </button>
 
             <p>
                 Отображаются {subscriptions.length} из {total} подписок
@@ -145,7 +177,11 @@ export const SubscriptionsPage: React.FC = () => {
                     onChange={handleCheck}
                 />
             ))}
+
+
         </div>
+
+
     );
 };
 
