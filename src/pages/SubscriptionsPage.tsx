@@ -2,15 +2,23 @@ import React, {useEffect, useState} from "react";
 import type {SubscriptionItem} from "../types/Subscription";
 import {SubscriptionCard} from "../components/SubscriptionCard";
 
+// 🔹 Локально расширяем тип, добавляя totalItemCount
+type SubscriptionWithCount = SubscriptionItem & {
+    totalItemCount?: number | null;
+};
+
 export const SubscriptionsPage: React.FC = () => {
-    const [subscriptions, setSubscriptions] = useState<SubscriptionItem[]>([]);
+    const [subscriptions, setSubscriptions] = useState<SubscriptionWithCount[]>([]);
     const [total, setTotal] = useState<number>(0);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
 
-    // фильтр: вводим отдельно, применяем по кнопке
+    // фильтр
     const [draftFilter, setDraftFilter] = useState("");
     const [appliedFilter, setAppliedFilter] = useState("");
+
+    // сортировка
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
     // пагинация
     const [page, setPage] = useState(1);
@@ -23,14 +31,16 @@ export const SubscriptionsPage: React.FC = () => {
             setLoading(true);
             try {
                 const res = await fetch(
-                    `/api/subscriptions?query=${encodeURIComponent(appliedFilter)}&page=${page}&limit=${itemsPerPage}`,
+                    `/api/subscriptions?query=${encodeURIComponent(appliedFilter)}&page=${page}&limit=${itemsPerPage}&sort=${sortOrder}`,
                     { credentials: "include", signal: ac.signal }
                 );
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
 
-                const items = (data.items ?? []).map((item: any) => {
+                const items: SubscriptionWithCount[] = (data.items ?? []).map((item: any) => {
                     const channelId = item?.snippet?.resourceId?.channelId ?? "";
+                    const totalItemCount = item?.contentDetails?.totalItemCount ?? null;
+
                     return {
                         id: item.id,
                         title: item?.snippet?.title ?? "",
@@ -38,11 +48,12 @@ export const SubscriptionsPage: React.FC = () => {
                         thumbnailUrl: item?.snippet?.thumbnails?.default?.url ?? "",
                         channelId,
                         channelUrl: channelId ? `https://www.youtube.com/channel/${channelId}` : "",
-                    } as SubscriptionItem;
+                        totalItemCount,
+                    };
                 });
 
                 setSubscriptions(items);
-                setTotal(data.totalResults ?? 0);
+                setTotal(data.totalResults ?? data?.pageInfo?.totalResults ?? 0);
             } catch (e) {
                 if ((e as any).name !== "AbortError") {
                     console.error(e);
@@ -53,17 +64,15 @@ export const SubscriptionsPage: React.FC = () => {
         })();
 
         return () => ac.abort();
-    }, [appliedFilter, page, itemsPerPage]);
+    }, [appliedFilter, page, itemsPerPage, sortOrder]); // 🔹 обновляем при смене sortOrder
 
-    // применяем фильтр по кнопке
+    // применяем фильтр
     const applyFilter = () => {
         setPage(1);
         setAppliedFilter(draftFilter.trim());
-        // выбранные чекбоксы лучше очистить при новом фильтре, чтобы не висели "невидимые" выделения
         setSelectedIds(new Set());
     };
 
-    // очистка фильтра
     const clearFilter = () => {
         setDraftFilter("");
         setAppliedFilter("");
@@ -71,7 +80,6 @@ export const SubscriptionsPage: React.FC = () => {
         setSelectedIds(new Set());
     };
 
-    // отметка одного элемента
     const handleCheck = (id: string, isChecked: boolean) => {
         setSelectedIds((prev) => {
             const newSet = new Set(prev);
@@ -80,7 +88,6 @@ export const SubscriptionsPage: React.FC = () => {
         });
     };
 
-    // массовая отписка
     const handleUnsubscribe = async () => {
         setLoading(true);
         try {
@@ -94,8 +101,6 @@ export const SubscriptionsPage: React.FC = () => {
             if (res.ok) {
                 setSubscriptions((prev) => prev.filter((s) => !selectedIds.has(s.id)));
                 setSelectedIds(new Set());
-                // total можно уменьшить на удалённое кол-во, если хочешь:
-                // setTotal(t => Math.max(0, t - deletedCount));
             } else {
                 alert("Ошибка при удалении подписок");
             }
@@ -104,7 +109,6 @@ export const SubscriptionsPage: React.FC = () => {
         }
     };
 
-    // выбрать все/снять все — именно видимые (текущая страница)
     const handleSelectAllVisible = () => {
         const newSet = new Set(selectedIds);
         subscriptions.forEach(sub => newSet.add(sub.id));
@@ -140,6 +144,15 @@ export const SubscriptionsPage: React.FC = () => {
                 </button>
                 <button onClick={clearFilter} disabled={(!draftFilter && !appliedFilter) || loading}>
                     Сбросить
+                </button>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+                <button
+                    onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
+                    disabled={loading}
+                >
+                    Сортировка по количеству видео ({sortOrder === "asc" ? "возр." : "убыв."})
                 </button>
             </div>
 
@@ -184,12 +197,18 @@ export const SubscriptionsPage: React.FC = () => {
                 <p>Ничего не найдено</p>
             ) : (
                 subscriptions.map((item) => (
-                    <SubscriptionCard
-                        key={item.id}
-                        item={item}
-                        checked={selectedIds.has(item.id)}
-                        onChange={handleCheck}
-                    />
+                    <div key={item.id} style={{ marginBottom: 8 }}>
+                        <SubscriptionCard
+                            item={item}
+                            checked={selectedIds.has(item.id)}
+                            onChange={handleCheck}
+                        />
+                        <div style={{ fontSize: 12, color: "#666", margin: "4px 0 0 34px" }}>
+                            {typeof item.totalItemCount === "number"
+                                ? `Всего элементов (по данным подписки): ${item.totalItemCount}`
+                                : "Всего элементов: —"}
+                        </div>
+                    </div>
                 ))
             )}
         </div>
