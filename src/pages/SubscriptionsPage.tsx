@@ -2,7 +2,6 @@ import React, {useEffect, useState} from "react";
 import type {SubscriptionItem} from "../types/Subscription";
 import {SubscriptionCard} from "../components/SubscriptionCard";
 
-// 🔹 Локально расширяем тип, добавляя totalItemCount
 type SubscriptionWithCount = SubscriptionItem & {
     totalItemCount?: number | null;
 };
@@ -13,25 +12,22 @@ export const SubscriptionsPage: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(false);
 
-    // фильтр
     const [draftFilter, setDraftFilter] = useState("");
     const [appliedFilter, setAppliedFilter] = useState("");
 
-    // сортировка
-    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-
-    // пагинация
     const [page, setPage] = useState(1);
     const itemsPerPage = 25;
 
+    // 🔹 ключ, который форсит перезагрузку при изменении
+    const [refreshKey, setRefreshKey] = useState(0);
+
     useEffect(() => {
         const ac = new AbortController();
-
         (async () => {
             setLoading(true);
             try {
                 const res = await fetch(
-                    `/api/subscriptions?query=${encodeURIComponent(appliedFilter)}&page=${page}&limit=${itemsPerPage}&sort=${sortOrder}`,
+                    `/api/subscriptions?query=${encodeURIComponent(appliedFilter)}&page=${page}&limit=${itemsPerPage}`,
                     { credentials: "include", signal: ac.signal }
                 );
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -40,7 +36,6 @@ export const SubscriptionsPage: React.FC = () => {
                 const items: SubscriptionWithCount[] = (data.items ?? []).map((item: any) => {
                     const channelId = item?.snippet?.resourceId?.channelId ?? "";
                     const totalItemCount = item?.contentDetails?.totalItemCount ?? null;
-
                     return {
                         id: item.id,
                         title: item?.snippet?.title ?? "",
@@ -55,18 +50,14 @@ export const SubscriptionsPage: React.FC = () => {
                 setSubscriptions(items);
                 setTotal(data.totalResults ?? data?.pageInfo?.totalResults ?? 0);
             } catch (e) {
-                if ((e as any).name !== "AbortError") {
-                    console.error(e);
-                }
+                if ((e as any).name !== "AbortError") console.error(e);
             } finally {
                 setLoading(false);
             }
         })();
-
         return () => ac.abort();
-    }, [appliedFilter, page, itemsPerPage, sortOrder]); // 🔹 обновляем при смене sortOrder
+    }, [appliedFilter, page, itemsPerPage, refreshKey]); // ← добавили refreshKey
 
-    // применяем фильтр
     const applyFilter = () => {
         setPage(1);
         setAppliedFilter(draftFilter.trim());
@@ -81,11 +72,31 @@ export const SubscriptionsPage: React.FC = () => {
     };
 
     const handleCheck = (id: string, isChecked: boolean) => {
-        setSelectedIds((prev) => {
-            const newSet = new Set(prev);
-            isChecked ? newSet.add(id) : newSet.delete(id);
-            return newSet;
+        setSelectedIds(prev => {
+            const s = new Set(prev);
+            isChecked ? s.add(id) : s.delete(id);
+            return s;
         });
+    };
+
+    // 🔄 Принудительно обновить кэш на сервере и перезагрузить текущую страницу
+    const forceRefresh = async () => {
+        try {
+            setLoading(true);
+            const resp = await fetch("/api/subscriptions/refresh", {
+                method: "POST",
+                credentials: "include",
+            });
+            if (!resp.ok && resp.status !== 204) {
+                console.error("Failed to refresh cache", resp.status);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            // триггерим перезагрузку данных
+            setRefreshKey(k => k + 1);
+            setLoading(false);
+        }
     };
 
     const handleUnsubscribe = async () => {
@@ -93,14 +104,15 @@ export const SubscriptionsPage: React.FC = () => {
         try {
             const res = await fetch("/api/unsubscribe", {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ids: Array.from(selectedIds)}),
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: Array.from(selectedIds) }),
                 credentials: "include",
             });
-
             if (res.ok) {
-                setSubscriptions((prev) => prev.filter((s) => !selectedIds.has(s.id)));
+                setSubscriptions(prev => prev.filter(s => !selectedIds.has(s.id)));
                 setSelectedIds(new Set());
+                // необязательно: подтянем свежий список после отписки
+                setRefreshKey(k => k + 1);
             } else {
                 alert("Ошибка при удалении подписок");
             }
@@ -110,15 +122,14 @@ export const SubscriptionsPage: React.FC = () => {
     };
 
     const handleSelectAllVisible = () => {
-        const newSet = new Set(selectedIds);
-        subscriptions.forEach(sub => newSet.add(sub.id));
-        setSelectedIds(newSet);
+        const s = new Set(selectedIds);
+        subscriptions.forEach(sub => s.add(sub.id));
+        setSelectedIds(s);
     };
-
     const handleDeselectAllVisible = () => {
-        const newSet = new Set(selectedIds);
-        subscriptions.forEach(sub => newSet.delete(sub.id));
-        setSelectedIds(newSet);
+        const s = new Set(selectedIds);
+        subscriptions.forEach(sub => s.delete(sub.id));
+        setSelectedIds(s);
     };
 
     const canGoPrev = page > 1;
@@ -145,14 +156,10 @@ export const SubscriptionsPage: React.FC = () => {
                 <button onClick={clearFilter} disabled={(!draftFilter && !appliedFilter) || loading}>
                     Сбросить
                 </button>
-            </div>
 
-            <div style={{ marginBottom: 12 }}>
-                <button
-                    onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
-                    disabled={loading}
-                >
-                    Сортировка по количеству видео ({sortOrder === "asc" ? "возр." : "убыв."})
+                {/* ⚡ Кнопка принудительного обновления кэша */}
+                <button onClick={forceRefresh} disabled={loading} title="Сбросить кэш и перечитать подписки">
+                    Обновить кэш
                 </button>
             </div>
 
@@ -170,16 +177,10 @@ export const SubscriptionsPage: React.FC = () => {
                 <span>Страница {page}</span>
 
                 <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                    <button
-                        onClick={handleSelectAllVisible}
-                        disabled={subscriptions.length === 0 || loading}
-                    >
+                    <button onClick={handleSelectAllVisible} disabled={subscriptions.length === 0 || loading}>
                         Выбрать все отображаемые
                     </button>
-                    <button
-                        onClick={handleDeselectAllVisible}
-                        disabled={subscriptions.length === 0 || loading}
-                    >
+                    <button onClick={handleDeselectAllVisible} disabled={subscriptions.length === 0 || loading}>
                         Снять выделение
                     </button>
                 </div>
